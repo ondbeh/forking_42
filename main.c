@@ -17,6 +17,7 @@ typedef unsigned long u64;
 #pragma pack(1)
 
 #define NUM_THREADS 8
+#define HEADER_COLOR 0xD9BC7F
 
 typedef struct bmp_header
 {
@@ -57,7 +58,6 @@ typedef struct {
     int found;
 } 	t_thread_data;
 
-
 struct file_content   read_entire_file(char* filename)
 {
 	char* file_data = 0;
@@ -96,18 +96,18 @@ int confirm_header( t_content* content, i8* data_address)
 	for (u32 i = 0; i < 7; i++)
 	{
 		curr_address = data_address + ( i * header->bit_per_pixel / 8 );
-		channel_B = *data_address;
-		channel_G = *(data_address + 1);
-		channel_R = *(data_address + 2);
+		channel_B = *curr_address;
+		channel_G = *(curr_address + 1);
+		channel_R = *(curr_address + 2);
 		if (channel_B != 127 || channel_G != 188 || channel_R != 217)
 			return 0;
 	}
 	for (u32 i = 0; i < 8; i++)
 	{
 		curr_address = data_address - ( i * header->width * header->bit_per_pixel / 8 );
-		channel_B = *data_address;
-		channel_G = *(data_address + 1);
-		channel_R = *(data_address + 2);
+		channel_B = *curr_address;
+		channel_G = *(curr_address + 1);
+		channel_R = *(curr_address + 2);
 		if (channel_B != 127 || channel_G != 188 || channel_R != 217)
 			return 0;
 	}
@@ -173,13 +173,15 @@ u32	get_msg_len(t_content* content, t_position* position)
 	return  (u32) b_len + (u32)r_len;
 }
 
-void read_message(t_content* content, t_position* position, u16 msg_len)
+void read_message(t_content* content, t_position* position, u16 msg_len, char msg[512])
 {
 	i8 *msg_address = position_to_pointer(content, &(t_position){position->row + 2, position->col + 2});
 	i8 where_am_i = 1;
-	while (msg_len--)
+    u32 i = 0;
+
+	while (i < msg_len)
 	{
-		write(STDOUT_FILENO, msg_address, 1);
+		msg[i++] = *msg_address;
 		msg_address++;
 		where_am_i++;
 		if (where_am_i == 24)
@@ -194,13 +196,14 @@ void read_message(t_content* content, t_position* position, u16 msg_len)
 			where_am_i++;
 		}
 	}
+    msg[i] = '\0';
 }
-
 
 int main(int argc, char** argv)
 {
 	t_position	position;
 	u32			msg_len;
+    char       msg[512];
 
 	if (argc != 2)
 	{
@@ -215,6 +218,7 @@ int main(int argc, char** argv)
 	}
 	position = traverse_file(&file_content);
 	msg_len = get_msg_len(&file_content, &position);
-	read_message(&file_content, &position, msg_len);
+	read_message(&file_content, &position, msg_len, msg);
+    printf("%s\n", msg);
 	return 0;
 }
