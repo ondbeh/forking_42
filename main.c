@@ -92,25 +92,22 @@ int confirm_header( t_content* content, i8* data_address)
 {
 	i8* curr_address;
 	t_header *header = (t_header*)content->data;
-	u8 channel_R, channel_G, channel_B;
-	for (u32 i = 0; i < 7; i++)
+    u32 i = 0;
+	for (i = 0; i < 7; i++)
 	{
 		curr_address = data_address + ( i * header->bit_per_pixel / 8 );
-		channel_B = *curr_address;
-		channel_G = *(curr_address + 1);
-		channel_R = *(curr_address + 2);
-		if (channel_B != 127 || channel_G != 188 || channel_R != 217)
+		if (*(u32 *)curr_address != HEADER_COLOR)
 			return 0;
 	}
-	for (u32 i = 0; i < 8; i++)
+	for (i = 0; i < 8; i++)
 	{
 		curr_address = data_address - ( i * header->width * header->bit_per_pixel / 8 );
-		channel_B = *curr_address;
-		channel_G = *(curr_address + 1);
-		channel_R = *(curr_address + 2);
-		if (channel_B != 127 || channel_G != 188 || channel_R != 217)
+		if (*(u32 *)curr_address != HEADER_COLOR)
 			return 0;
 	}
+    curr_address = data_address - ( i * header->width * header->bit_per_pixel / 8 );
+	if (*(u32 *)curr_address == HEADER_COLOR)
+		return 0;
 	return 1;
 }
 
@@ -119,15 +116,11 @@ void* search_header(void* arg) {
     t_content* content = data->content;
     t_header* header = data->header;
     i8* data_address;
-    u8 channel_R, channel_G, channel_B;
 
     for (u32 row = data->start_row; row < data->end_row; row++) {
         for (u32 col = 0; col < header->width; col++) {
             data_address = position_to_pointer(content, &(t_position){row, col});
-            channel_B = *data_address;
-            channel_G = *(data_address + 1);
-            channel_R = *(data_address + 2);
-            if (channel_B == 127 && channel_G == 188 && channel_R == 217 && is_possible_header(row, col, header)) {
+            if (*(u32 *)data_address == HEADER_COLOR && is_possible_header(row, col, header)) {
                 if (confirm_header(content, data_address)) {
                     data->result = (t_position){row, col};
                     data->found = 1;
