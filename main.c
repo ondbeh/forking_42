@@ -99,15 +99,15 @@ int confirm_header( t_content* content, i8* data_address)
 		if (*(u32 *)curr_address != HEADER_COLOR)
 			return 0;
 	}
+    curr_address = data_address + ( i * header->bit_per_pixel / 8 );
+	if (*(u32 *)curr_address == HEADER_COLOR)
+		return 0;
 	for (i = 0; i < 8; i++)
 	{
 		curr_address = data_address - ( i * header->width * header->bit_per_pixel / 8 );
 		if (*(u32 *)curr_address != HEADER_COLOR)
 			return 0;
 	}
-    curr_address = data_address - ( i * header->width * header->bit_per_pixel / 8 );
-	if (*(u32 *)curr_address == HEADER_COLOR)
-		return 0;
 	return 1;
 }
 
