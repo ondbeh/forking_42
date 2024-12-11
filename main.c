@@ -14,7 +14,8 @@ typedef unsigned long u64;
 #define PRINT_ERROR(cstring) write(STDERR_FILENO, cstring, sizeof(cstring) - 1)
 
 #pragma pack(1)
-struct bmp_header
+
+typedef struct bmp_header
 {
 	// Note: header
 	i8  signature[2]; // should equal to "BM"
@@ -31,13 +32,18 @@ struct bmp_header
 	u32 compression_type; // should be 0
 	u32 compressed_image_size; // should be 0
 	// Note: there are more stuff there but it is not important here
-};
+}	t_header;
 
-struct file_content
+typedef struct file_content
 {
 	i8*   data;
 	u32   size;
-};
+} t_content;
+
+typedef struct s_position{
+	u32 row;
+	u32 col;
+} t_position;
 
 struct file_content   read_entire_file(char* filename)
 {
@@ -55,8 +61,111 @@ struct file_content   read_entire_file(char* filename)
 	return (struct file_content){file_data, file_size};
 }
 
+int is_possible_header(u32 row, u32 col, t_header* header)
+{
+	if (row + 7 < header->height && col + 7 < header->width)
+	{
+		return 1;
+	}
+	return 0;
+}
+
+i8 *position_to_pointer(t_content* content, t_position* position)
+{
+	t_header *header = (t_header*)content->data;
+	return content->data + header->data_offset +
+		(( header->height - ( position->row + 1 )) * header->width + position->col) * header->bit_per_pixel / 8;
+}
+
+int confirm_header( t_content* content, i8* data_address)
+{
+	i8* curr_address;
+	t_header *header = (t_header*)content->data;
+	u8 channel_R, channel_G, channel_B;
+	for (u32 i = 0; i < 7; i++)
+	{
+		curr_address = data_address + ( i * header->bit_per_pixel / 8 );
+		channel_B = *data_address;
+		channel_G = *(data_address + 1);
+		channel_R = *(data_address + 2);
+		if (channel_B != 127 || channel_G != 188 || channel_R != 217)
+			return 0;
+	}
+	for (u32 i = 0; i < 8; i++)
+	{
+		curr_address = data_address - ( i * header->width * header->bit_per_pixel / 8 );
+		channel_B = *data_address;
+		channel_G = *(data_address + 1);
+		channel_R = *(data_address + 2);
+		if (channel_B != 127 || channel_G != 188 || channel_R != 217)
+			return 0;
+	}
+	return 1;
+}
+
+t_position traverse_file(t_content* content)
+{
+	t_header *header = (t_header*)content->data;
+	i8* data_address;
+	u8 channel_R, channel_G, channel_B;
+
+	for (u32 row = 0; row < header->height; row++)
+	{
+		for (u32 col = 0; col < header->width; col++)
+		{
+			data_address = position_to_pointer(content, &(t_position){row, col});
+			channel_B = *data_address;
+			channel_G = *(data_address + 1);
+			channel_R = *(data_address + 2);
+			//printf("B: %u, G: %u, R: %u\n", channel_B, channel_G, channel_R);
+			if (channel_B == 127 && channel_G == 188 && channel_R == 217 && is_possible_header(row, col, header))
+				if(confirm_header(content, data_address))
+				{
+					return (t_position){row, col};
+				}
+		}
+	}
+	return (t_position){header->height, header->width};
+}
+
+u32	get_msg_len(t_content* content, t_position* position)
+{
+	i8 *size_address = position_to_pointer(content, &(t_position){position->row, position->col + 7});
+	u8 b_len = *size_address;
+	u8 r_len = *(size_address + 2);
+	return  (u32) b_len + (u32)r_len;
+}
+
+void read_message(t_content* content, t_position* position, u16 msg_len)
+{
+	i8 *msg_address = position_to_pointer(content, &(t_position){position->row + 2, position->col + 2});
+	i8 where_am_i = 1;
+	while (msg_len--)
+	{
+		write(STDOUT_FILENO, msg_address, 1);
+		msg_address++;
+		where_am_i++;
+		if (where_am_i == 24)
+		{
+			position->row += 1;
+			msg_address = position_to_pointer(content, &(t_position){position->row + 2, position->col + 2});
+			where_am_i = 1;
+		}
+		else if (where_am_i % 4 == 0)
+		{
+			msg_address++;
+			where_am_i++;
+		}
+	}
+	write(STDOUT_FILENO, "\n", 1);
+}
+
+
 int main(int argc, char** argv)
 {
+	t_position position;
+	u32 msg_len;
+
 	if (argc != 2)
 	{
 		PRINT_ERROR("Usage: decode <input_filename>\n");
@@ -69,6 +178,11 @@ int main(int argc, char** argv)
 		return 1;
 	}
 	struct bmp_header* header = (struct bmp_header*) file_content.data;
+	position = traverse_file(&file_content);
+	msg_len = get_msg_len(&file_content, &position);
+	printf("Position: %u, %u\n", position.row, position.col);
+	read_message(&file_content, &position, msg_len);
+	printf("Message length: %u\n", msg_len);
 	printf("signature: %.2s\nfile_size: %u\ndata_offset: %u\ninfo_header_size: %u\nwidth: %u\nheight: %u\nplanes: %i\nbit_per_px: %i\ncompression_type: %u\ncompression_size: %u\n", header->signature, header->file_size, header->data_offset, header->info_header_size, header->width, header->height, header->number_of_planes, header->bit_per_pixel, header->compression_type, header->compressed_image_size);
 	return 0;
 }
