@@ -1,2 +1,4 @@
 *.bmp
 decoder
+decoder_debug
+.idea/

@@ -3,7 +3,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <pthread.h>
 
 typedef char i8;
 typedef unsigned char u8;
@@ -16,7 +15,6 @@ typedef unsigned long u64;
 
 #pragma pack(1)
 
-#define NUM_THREADS 8
 #define HEADER_COLOR 0xD9BC7F
 
 typedef struct bmp_header
@@ -36,12 +34,12 @@ typedef struct bmp_header
 	u32 compression_type; // should be 0
 	u32 compressed_image_size; // should be 0
 	// Note: there are more stuff there but it is not important here
-}	t_header;
+} t_header;
 
 typedef struct file_content
 {
-	i8*   data;
-	u32   size;
+	i8* data;
+	u32 size;
 } t_content;
 
 typedef struct s_position{
@@ -49,19 +47,10 @@ typedef struct s_position{
 	u32 col;
 } t_position;
 
-typedef struct {
-    t_content* content;
-    t_header* header;
-    u32 start_row;
-    u32 end_row;
-    t_position result;
-    int found;
-} 	t_thread_data;
-
-struct file_content   read_entire_file(char* filename)
+struct file_content read_entire_file(char* filename)
 {
 	char* file_data = 0;
-	unsigned long	file_size = 0;
+	unsigned long file_size = 0;
 	int input_file_fd = open(filename, O_RDONLY);
 	if (input_file_fd >= 0)
 	{
@@ -85,92 +74,69 @@ inline static i8 *position_to_pointer(t_content* content, t_position* position)
 {
 	t_header *header = (t_header*)content->data;
 	return content->data + header->data_offset +
-		(( header->height - ( position->row + 1 )) * header->width + position->col) * header->bit_per_pixel / 8;
+		   ((header->height - (position->row + 1)) * header->width + position->col) * header->bit_per_pixel / 8;
 }
 
-int confirm_header( t_content* content, i8* data_address)
+int confirm_header(t_content* content, i8* data_address)
 {
 	i8* curr_address;
 	t_header *header = (t_header*)content->data;
-    u32 i = 0;
+	u32 i = 0;
 	for (i = 0; i < 7; i++)
 	{
-		curr_address = data_address + ( i * header->bit_per_pixel / 8 );
+		curr_address = data_address + (i * header->bit_per_pixel / 8);
 		if (*(u32 *)curr_address != HEADER_COLOR)
 			return 0;
 	}
-    curr_address = data_address + ( i * header->bit_per_pixel / 8 );
+	curr_address = data_address + (i * header->bit_per_pixel / 8);
 	if (*(u32 *)curr_address == HEADER_COLOR)
 		return 0;
 	for (i = 0; i < 8; i++)
 	{
-		curr_address = data_address - ( i * header->width * header->bit_per_pixel / 8 );
+		curr_address = data_address - (i * header->width * header->bit_per_pixel / 8);
 		if (*(u32 *)curr_address != HEADER_COLOR)
 			return 0;
 	}
 	return 1;
 }
 
-void* search_header(void* arg) {
-    t_thread_data* data = (t_thread_data*)arg;
-    t_content* content = data->content;
-    t_header* header = data->header;
-    i8* data_address;
+t_position traverse_file(t_content* content)
+{
+	t_header* header = (t_header*)content->data;
+	t_position result = {header->height, header->width};
+	i8* data_address;
 
-    for (u32 row = data->start_row; row < data->end_row; row++) {
-        for (u32 col = 0; col < header->width; col++) {
-            data_address = position_to_pointer(content, &(t_position){row, col});
-            if (*(u32 *)data_address == HEADER_COLOR && is_possible_header(row, col, header)) {
-                if (confirm_header(content, data_address)) {
-                    data->result = (t_position){row, col};
-                    data->found = 1;
-                    return NULL;
-                }
-            }
-        }
-    }
-    data->found = 0;
-    return NULL;
+	for (u32 row = 0; row < header->height; row++)
+	{
+		for (u32 col = 0; col < header->width; col++)
+		{
+			data_address = position_to_pointer(content, &(t_position){row, col});
+			if (*(u32 *)data_address == HEADER_COLOR && is_possible_header(row, col, header))
+			{
+				if (confirm_header(content, data_address))
+				{
+					result = (t_position){row, col};
+					return result;
+				}
+			}
+		}
+	}
+	return result;
 }
 
-t_position traverse_file(t_content* content) {
-    t_header* header = (t_header*)content->data;
-    pthread_t threads[NUM_THREADS];
-    t_thread_data thread_data[NUM_THREADS];
-    u32 rows_per_thread = header->height / NUM_THREADS;
-    t_position result = {header->height, header->width};
-
-    for (int i = 0; i < NUM_THREADS; i++) {
-        thread_data[i].content = content;
-        thread_data[i].header = header;
-        thread_data[i].start_row = i * rows_per_thread;
-        thread_data[i].end_row = (i == NUM_THREADS - 1) ? header->height : (i + 1) * rows_per_thread;
-        pthread_create(&threads[i], NULL, search_header, &thread_data[i]);
-    }
-
-    for (int i = 0; i < NUM_THREADS; i++) {
-        pthread_join(threads[i], NULL);
-        if (thread_data[i].found) {
-            result = thread_data[i].result;
-            break;
-        }
-    }
-    return result;
-}
-
-u32	get_msg_len(t_content* content, t_position* position)
+u32 get_msg_len(t_content* content, t_position* position)
 {
 	i8 *size_address = position_to_pointer(content, &(t_position){position->row, position->col + 7});
 	u8 b_len = *size_address;
 	u8 r_len = *(size_address + 2);
-	return  (u32) b_len + (u32)r_len;
+	return (u32)b_len + (u32)r_len;
 }
 
 void read_message(t_content* content, t_position* position, u16 msg_len, char msg[512])
 {
 	i8 *msg_address = position_to_pointer(content, &(t_position){position->row + 2, position->col + 2});
 	i8 where_am_i = 1;
-    u32 i = 0;
+	u32 i = 0;
 
 	while (i < msg_len)
 	{
@@ -189,14 +155,14 @@ void read_message(t_content* content, t_position* position, u16 msg_len, char ms
 			where_am_i++;
 		}
 	}
-    msg[i] = '\0';
+	msg[i] = '\0';
 }
 
 int main(int argc, char** argv)
 {
-	t_position	position;
-	u32			msg_len;
-    char       msg[512];
+	t_position position;
+	u32 msg_len;
+	char msg[512];
 
 	if (argc != 2)
 	{
@@ -212,6 +178,6 @@ int main(int argc, char** argv)
 	position = traverse_file(&file_content);
 	msg_len = get_msg_len(&file_content, &position);
 	read_message(&file_content, &position, msg_len, msg);
-    printf("%s\n", msg);
+	printf("%s\n", msg);
 	return 0;
 }
